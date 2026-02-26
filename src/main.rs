@@ -13,7 +13,7 @@ fn main() {
     let filename = std::env::args().nth(1).expect("missing filename");
     let file = File::open(filename).expect("could not open file");
     let mut file = BufReader::new(file);
-    let mut stats = HashMap::new();
+    let mut stats: HashMap<String, Weather> = HashMap::new();
 
     let mut buf = Vec::with_capacity(100);
     while let Ok(n) = file.read_until(b'\n', &mut buf)
@@ -25,24 +25,27 @@ fn main() {
         }
         let (city, temperature) = line.split_once(';').unwrap();
         let temperature = temperature.parse::<f64>().unwrap();
-        stats
-            .entry(city.to_string())
-            .and_modify(|entry: &mut Weather| {
-                if temperature < entry.min {
-                    entry.min = temperature;
-                } else if temperature > entry.max {
-                    entry.max = temperature;
-                }
 
-                entry.mean += temperature;
-                entry.samples += 1;
-            })
-            .or_insert(Weather {
-                samples: 1,
-                min: temperature,
-                mean: temperature,
-                max: temperature,
-            });
+        if let Some(entry) = stats.get_mut(city) {
+            if temperature < entry.min {
+                entry.min = temperature;
+            } else if temperature > entry.max {
+                entry.max = temperature;
+            }
+
+            entry.mean += temperature;
+            entry.samples += 1;
+        } else {
+            stats.insert(
+                city.to_string(),
+                Weather {
+                    samples: 1,
+                    min: temperature,
+                    mean: temperature,
+                    max: temperature,
+                },
+            );
+        }
 
         buf.clear();
     }
