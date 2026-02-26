@@ -21,21 +21,24 @@ fn memchr(buf: &[u8], c: u8) -> usize {
 }
 
 #[inline]
-fn parse_temperature(mut temperature: &[u8]) -> i16 {
+fn parse_temperature_inner(temperature: &[u8]) -> i16 {
     let to_digit = |b: u8| -> i16 { (b - b'0') as i16 };
-    let is_negative = temperature[0] == b'-';
-    if is_negative {
-        temperature = &temperature[1..];
-    }
 
     // Single digit temperature.
-    let result = if temperature[1] == b'.' {
+    if temperature[1] == b'.' {
         to_digit(temperature[0]) * 10 + to_digit(temperature[2])
     } else {
         to_digit(temperature[0]) * 100 + to_digit(temperature[1]) * 10 + to_digit(temperature[3])
-    };
+    }
+}
 
-    if is_negative { -result } else { result }
+#[inline]
+fn parse_temperature(temperature: &[u8]) -> i16 {
+    if temperature[0] == b'-' {
+        -parse_temperature_inner(&temperature[1..])
+    } else {
+        parse_temperature_inner(temperature)
+    }
 }
 
 fn main() {
