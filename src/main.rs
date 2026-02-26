@@ -12,11 +12,14 @@ struct Weather {
 fn main() {
     let filename = std::env::args().nth(1).expect("missing filename");
     let file = File::open(filename).expect("could not open file");
-    let file = BufReader::new(file);
+    let mut file = BufReader::new(file);
     let mut stats = HashMap::new();
 
-    for line in file.lines() {
-        let line = line.unwrap();
+    let mut buf = Vec::with_capacity(100);
+    while let Ok(n) = file.read_until(b'\n', &mut buf)
+        && n > 0
+    {
+        let line = unsafe { str::from_utf8_unchecked(&buf[..n - 1]) };
         if line.starts_with('#') {
             continue;
         }
@@ -40,6 +43,8 @@ fn main() {
                 mean: temperature,
                 max: temperature,
             });
+
+        buf.clear();
     }
 
     let mut stats: Vec<(String, f64, f64, f64)> = stats
