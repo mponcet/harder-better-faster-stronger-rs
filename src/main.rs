@@ -1,3 +1,4 @@
+use libc::{c_int, c_void, memchr};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -23,7 +24,11 @@ fn main() {
         if line.starts_with('#') {
             continue;
         }
-        let (city, temperature) = line.split_once(';').unwrap();
+
+        let pos =
+            unsafe { memchr(line.as_ptr() as *const c_void, b';' as c_int, n - 1) } as *const u8;
+        let pos = unsafe { pos.offset_from(line.as_ptr()) } as usize;
+        let (city, temperature) = (&line[..pos], &line[pos + 1..line.len()]);
         let temperature = temperature.parse::<f64>().unwrap();
 
         if let Some(entry) = stats.get_mut(city) {
