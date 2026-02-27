@@ -33,6 +33,6 @@ The program should print out the min, mean, and max values per station, alphabet
 
 ## Hardware
 
-AMD Ryzen 7 5700X3D 8-Core Processor
-32GB DDR4-3200
-Samsung NVMe SSD 990 PRO
+- AMD Ryzen 7 5700X3D 8-Core Processor
+- 32GB DDR4-3200
+- Samsung NVMe SSD 990 PRO
