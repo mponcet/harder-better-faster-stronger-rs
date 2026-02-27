@@ -69,7 +69,7 @@ fn main() {
         libc::madvise(addr, len, libc::MADV_SEQUENTIAL);
         std::slice::from_raw_parts(addr as *const u8, len)
     };
-    let mut stats: HashMap<String, Weather> = HashMap::new();
+    let mut stats: HashMap<String, Weather> = HashMap::with_capacity(10_000);
 
     while !buf.is_empty() {
         if buf[0] == b'#' {
