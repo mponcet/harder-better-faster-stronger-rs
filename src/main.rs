@@ -1,4 +1,3 @@
-use libc::{c_int, c_void};
 use std::collections::HashMap;
 use std::fs::File;
 use std::os::fd::AsRawFd;
@@ -8,16 +7,6 @@ struct Weather {
     min: i16,
     mean: i64,
     max: i16,
-}
-
-#[inline]
-fn memchr(buf: &[u8], c: u8) -> usize {
-    let off = unsafe {
-        let addr = libc::memchr(buf.as_ptr() as *const c_void, c as c_int, buf.len()) as *const u8;
-        // Assume addr not null.
-        addr.offset_from(buf.as_ptr())
-    };
-    off as usize
 }
 
 #[inline]
@@ -41,6 +30,29 @@ fn parse_temperature(temperature: &[u8]) -> i16 {
     }
 }
 
+#[cfg(target_feature = "avx2")]
+#[inline]
+fn split_line(buf: &[u8]) -> (&[u8], &[u8], &[u8]) {
+    use std::arch::x86_64::*;
+
+    unsafe {
+        let line: __m256i = _mm256_loadu_si256(buf.as_ptr() as *const __m256i);
+        let sep: __m256i = _mm256_set1_epi8(b';' as i8);
+        let eol: __m256i = _mm256_set1_epi8(b'\n' as i8);
+        let sep_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(line, sep));
+        let eol_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(line, eol));
+
+        let sep_pos = sep_mask.trailing_zeros() as usize;
+        let eol_pos = eol_mask.trailing_zeros() as usize;
+
+        (
+            &buf[..sep_pos],
+            &buf[sep_pos + 1..eol_pos],
+            &buf[eol_pos + 1..],
+        )
+    }
+}
+
 fn main() {
     let filename = std::env::args().nth(1).expect("missing filename");
     let file = File::open(filename).expect("could not open file");
@@ -60,14 +72,11 @@ fn main() {
     let mut stats: HashMap<String, Weather> = HashMap::new();
 
     while !buf.is_empty() {
-        let line_end = memchr(buf, b'\n');
-        let line = &buf[..line_end];
-        if line[0] == b'#' {
+        if buf[0] == b'#' {
             continue;
         }
-
-        let pos = memchr(line, b';');
-        let (city, temperature) = (&line[..pos], &line[pos + 1..line.len()]);
+        let (city, temperature, remainder) = split_line(buf);
+        buf = remainder;
         let temperature = parse_temperature(temperature);
 
         let city = unsafe { str::from_utf8_unchecked(city) };
@@ -91,8 +100,6 @@ fn main() {
                 },
             );
         }
-
-        buf = &buf[line_end + 1..];
     }
 
     let mut stats: Vec<(String, f64, f64, f64)> = stats
