@@ -1,4 +1,5 @@
 use hashbrown::HashMap;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::hash::Hash;
 use std::os::fd::AsRawFd;
@@ -39,7 +40,6 @@ impl<'a> PartialEq for Station<'a> {
     }
 }
 
-#[inline]
 fn parse_temperature_inner(temperature: &[u8]) -> i16 {
     let to_digit = |b: u8| -> i16 { (b - b'0') as i16 };
 
@@ -51,7 +51,6 @@ fn parse_temperature_inner(temperature: &[u8]) -> i16 {
     }
 }
 
-#[inline]
 fn parse_temperature(temperature: &[u8]) -> i16 {
     if temperature[0] == b'-' {
         -parse_temperature_inner(&temperature[1..])
@@ -61,7 +60,6 @@ fn parse_temperature(temperature: &[u8]) -> i16 {
 }
 
 #[cfg(target_feature = "avx2")]
-#[inline]
 fn split_line(buf: &[u8]) -> (&[u8], &[u8], &[u8]) {
     use std::arch::x86_64::*;
 
@@ -105,14 +103,13 @@ fn main() {
         if buf[0] == b'#' {
             continue;
         }
-        let (city, temperature, remainder) = split_line(buf);
+        let (station, temperature, remainder) = split_line(buf);
         buf = remainder;
         let temperature = parse_temperature(temperature);
 
-        // let city = unsafe { str::from_utf8_unchecked(city) };
-        let city = Station(city);
+        let station = Station(station);
         stats
-            .entry(city)
+            .entry(station)
             .and_modify(|entry| {
                 if temperature < entry.min {
                     entry.min = temperature;
@@ -131,30 +128,41 @@ fn main() {
             });
     }
 
-    let mut stats: Vec<(&str, f64, f64, f64)> = stats
+    print(stats);
+}
+
+fn print(stats: HashMap<Station, Weather>) {
+    let stdout = std::io::stdout().lock();
+    let mut writer = std::io::BufWriter::new(stdout);
+    use std::io::Write;
+
+    let stats: BTreeMap<&str, (f64, f64, f64)> = stats
         .into_iter()
-        .map(|(city, weather)| {
+        .map(|(station, weather)| {
             (
-                unsafe { str::from_utf8_unchecked(city.0) },
-                weather.min as f64 / 10.0,
-                (weather.mean as f64 / 10.0 / weather.samples as f64),
-                weather.max as f64 / 10.0,
+                unsafe { str::from_utf8_unchecked(station.0) },
+                (
+                    weather.min as f64 / 10.0,
+                    (weather.mean as f64 / 10.0 / weather.samples as f64),
+                    weather.max as f64 / 10.0,
+                ),
             )
         })
         .collect();
 
-    stats.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    write!(writer, "{{").unwrap();
+    let mut stats = stats.into_iter().peekable();
+    while let Some((station, temperatures)) = stats.next() {
+        write!(
+            writer,
+            "{}={:.1}/{:.1}/{:.1}",
+            station, temperatures.0, temperatures.1, temperatures.2,
+        )
+        .unwrap();
 
-    print!("{{");
-    let len = stats.len();
-    for stat in stats.iter().take(len - 1) {
-        print!("{}={:.1}/{:.1}/{:.1}, ", stat.0, stat.1, stat.2, stat.3,);
+        if stats.peek().is_some() {
+            write!(writer, ", ").unwrap();
+        }
     }
-    println!(
-        "{}={:.1}/{:.1}/{:.1}}}",
-        stats[len - 1].0,
-        stats[len - 1].1,
-        stats[len - 1].2,
-        stats[len - 1].3
-    );
+    writeln!(writer, "}}").unwrap();
 }
