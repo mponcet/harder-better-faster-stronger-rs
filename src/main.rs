@@ -70,7 +70,7 @@ fn main() {
         libc::madvise(addr, len, libc::MADV_SEQUENTIAL);
         std::slice::from_raw_parts(addr as *const u8, len)
     };
-    let mut stats: HashMap<String, Weather> = HashMap::with_capacity(10_000);
+    let mut stats: HashMap<&str, Weather> = HashMap::with_capacity(10_000);
 
     while !buf.is_empty() {
         if buf[0] == b'#' {
@@ -101,7 +101,7 @@ fn main() {
             });
     }
 
-    let mut stats: Vec<(String, f64, f64, f64)> = stats
+    let mut stats: Vec<(&str, f64, f64, f64)> = stats
         .into_iter()
         .map(|(city, weather)| {
             (
@@ -113,7 +113,7 @@ fn main() {
         })
         .collect();
 
-    stats.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    stats.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
     print!("{{");
     let len = stats.len();
