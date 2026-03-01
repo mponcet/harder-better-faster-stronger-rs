@@ -40,20 +40,25 @@ impl<'a> PartialEq for Station<'a> {
     }
 }
 
+fn get_byte(bytes: &[u8], position: usize) -> u8 {
+    unsafe { *bytes.get_unchecked(position) }
+}
+
 fn parse_temperature_inner(temperature: &[u8]) -> i16 {
     let to_digit = |b: u8| -> i16 { (b - b'0') as i16 };
-
     // Single digit temperature.
-    if temperature[1] == b'.' {
-        to_digit(temperature[0]) * 10 + to_digit(temperature[2])
+    if get_byte(temperature, 1) == b'.' {
+        to_digit(get_byte(temperature, 0)) * 10 + to_digit(get_byte(temperature, 2))
     } else {
-        to_digit(temperature[0]) * 100 + to_digit(temperature[1]) * 10 + to_digit(temperature[3])
+        to_digit(get_byte(temperature, 0)) * 100
+            + to_digit(get_byte(temperature, 1)) * 10
+            + to_digit(get_byte(temperature, 3))
     }
 }
 
 fn parse_temperature(temperature: &[u8]) -> i16 {
-    if temperature[0] == b'-' {
-        -parse_temperature_inner(&temperature[1..])
+    if get_byte(temperature, 0) == b'-' {
+        -parse_temperature_inner(unsafe { temperature.get_unchecked(1..) })
     } else {
         parse_temperature_inner(temperature)
     }
@@ -74,9 +79,9 @@ fn split_line(buf: &[u8]) -> (&[u8], &[u8], &[u8]) {
         let eol_pos = eol_mask.trailing_zeros() as usize;
 
         (
-            &buf[..sep_pos],
-            &buf[sep_pos + 1..eol_pos],
-            &buf[eol_pos + 1..],
+            buf.get_unchecked(..sep_pos),
+            buf.get_unchecked(sep_pos + 1..eol_pos),
+            buf.get_unchecked(eol_pos + 1..),
         )
     }
 }
@@ -100,7 +105,7 @@ fn main() {
     let mut stats: HashMap<Station, Weather> = HashMap::with_capacity(10_000);
 
     while !buf.is_empty() {
-        if buf[0] == b'#' {
+        if get_byte(buf, 0) == b'#' {
             continue;
         }
         let (station, temperature, remainder) = split_line(buf);
