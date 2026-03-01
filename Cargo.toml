@@ -11,3 +11,8 @@ libc = "0.2.182"
 lto = "fat"
 panic = "abort"
 debug = true
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
