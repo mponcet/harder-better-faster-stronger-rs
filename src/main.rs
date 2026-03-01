@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+// use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::fs::File;
 use std::os::fd::AsRawFd;
 
@@ -80,26 +81,24 @@ fn main() {
         let temperature = parse_temperature(temperature);
 
         let city = unsafe { str::from_utf8_unchecked(city) };
-        if let Some(entry) = stats.get_mut(city) {
-            if temperature < entry.min {
-                entry.min = temperature;
-            } else if temperature > entry.max {
-                entry.max = temperature;
-            }
+        stats
+            .entry_ref(city)
+            .and_modify(|entry| {
+                if temperature < entry.min {
+                    entry.min = temperature;
+                } else if temperature > entry.max {
+                    entry.max = temperature;
+                }
 
-            entry.mean += temperature as i64;
-            entry.samples += 1;
-        } else {
-            stats.insert(
-                city.to_string(),
-                Weather {
-                    samples: 1,
-                    min: temperature,
-                    mean: temperature as i64,
-                    max: temperature,
-                },
-            );
-        }
+                entry.mean += temperature as i64;
+                entry.samples += 1;
+            })
+            .or_insert(Weather {
+                samples: 1,
+                min: temperature,
+                mean: temperature as i64,
+                max: temperature,
+            });
     }
 
     let mut stats: Vec<(String, f64, f64, f64)> = stats
