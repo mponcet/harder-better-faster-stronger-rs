@@ -1,10 +1,11 @@
-use hashbrown::HashMap;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs::File;
+use std::hash::BuildHasher;
 use std::hash::Hash;
+use std::hash::Hasher;
 use std::os::fd::AsRawFd;
 
-#[derive(Eq)]
 struct Station<'a>(&'a [u8]);
 
 struct Weather {
@@ -20,6 +21,41 @@ impl<'a> Hash for Station<'a> {
     }
 }
 
+struct CustomHasher(u64);
+struct CustomHasherBuilder;
+
+const LARGE_PRIME: u64 = 0x517cc1b727220a95;
+
+impl Hasher for CustomHasher {
+    fn finish(&self) -> u64 {
+        self.0 ^ (self.0.rotate_right(26))
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let len = bytes.len();
+
+        let k = match len {
+            0..4 => {
+                let lhs = get_byte(bytes, 0) as u64;
+                let mid = (get_byte(bytes, len / 2) as u64) << 8;
+                let rhs = (get_byte(bytes, len - 1) as u64) << 16;
+                lhs | mid | rhs
+            }
+            4.. => u32::from_le_bytes(unsafe { bytes[0..4].try_into().unwrap_unchecked() }) as u64,
+        };
+
+        self.0 = k.wrapping_mul(LARGE_PRIME);
+    }
+}
+
+impl BuildHasher for CustomHasherBuilder {
+    type Hasher = CustomHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        CustomHasher(0)
+    }
+}
+
 impl<'a> PartialEq for Station<'a> {
     #[cfg(target_feature = "avx2")]
     fn eq(&self, other: &Self) -> bool {
@@ -28,18 +64,20 @@ impl<'a> PartialEq for Station<'a> {
         if self.0.len() != other.0.len() {
             return false;
         }
+
         let diff = unsafe {
             let lhs: __m256i = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
             let rhs: __m256i = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(lhs, rhs)) as u32
         };
-
         let mask = (1 << self.0.len()) - 1;
-
         diff & mask == mask
     }
 }
 
+impl<'a> Eq for Station<'a> {}
+
+#[inline(always)]
 fn get_byte(bytes: &[u8], position: usize) -> u8 {
     unsafe { *bytes.get_unchecked(position) }
 }
@@ -102,7 +140,8 @@ fn main() {
         libc::madvise(addr, len, libc::MADV_SEQUENTIAL);
         std::slice::from_raw_parts(addr as *const u8, len)
     };
-    let mut stats: HashMap<Station, Weather> = HashMap::with_capacity(10_000);
+    let mut stats: HashMap<Station, Weather, CustomHasherBuilder> =
+        HashMap::with_capacity_and_hasher(10_000, CustomHasherBuilder);
 
     while !buf.is_empty() {
         if get_byte(buf, 0) == b'#' {
@@ -136,7 +175,7 @@ fn main() {
     print(stats);
 }
 
-fn print(stats: HashMap<Station, Weather>) {
+fn print(stats: HashMap<Station, Weather, CustomHasherBuilder>) {
     let stdout = std::io::stdout().lock();
     let mut writer = std::io::BufWriter::new(stdout);
     use std::io::Write;
