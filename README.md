@@ -1,5 +1,17 @@
 # One billion row challenge, in Rust
 
+## Hyperfine final results
+
+```
+$ hyperfine -w 3 './target/release/harder-better-faster-stronger-rs ../1brc/measurements.txt'
+Benchmark 1: ./target/release/harder-better-faster-stronger-rs ../1brc/measurements.txt
+  Time (mean ± σ):      1.525 s ±  0.010 s    [User: 15.829 s, System: 1.241 s]
+  Range (min … max):    1.506 s …  1.541 s    10 runs
+```
+
+(First attempt: 1m41s)
+
+
 ## Challenge
 
 The text file has a simple structure with one measurement value per row:
