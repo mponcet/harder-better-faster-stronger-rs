@@ -124,10 +124,8 @@ fn split_line(buf: &[u8]) -> (&[u8], &[u8], &[u8]) {
     }
 }
 
-fn main() {
-    let filename = std::env::args().nth(1).expect("missing filename");
-    let file = File::open(filename).expect("could not open file");
-    let mut buf = unsafe {
+fn mmap(file: &File) -> &[u8] {
+    unsafe {
         let len = file.metadata().unwrap().len() as usize;
         let addr = libc::mmap(
             std::ptr::null_mut(),
@@ -137,11 +135,21 @@ fn main() {
             file.as_raw_fd(),
             0,
         );
+        if addr.is_null() {
+            panic!("mmap failed");
+        }
         libc::madvise(addr, len, libc::MADV_SEQUENTIAL);
         std::slice::from_raw_parts(addr as *const u8, len)
-    };
+    }
+}
+
+fn main() {
+    let filename = std::env::args().nth(1).expect("missing filename");
+    let file = File::open(filename).expect("could not open file");
+
     let mut stats: HashMap<Station, Weather, CustomHasherBuilder> =
         HashMap::with_capacity_and_hasher(10_000, CustomHasherBuilder);
+    let mut buf = mmap(&file);
 
     while !buf.is_empty() {
         if get_byte(buf, 0) == b'#' {
