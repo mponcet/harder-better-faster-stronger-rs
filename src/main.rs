@@ -143,44 +143,92 @@ fn mmap(file: &File) -> &[u8] {
     }
 }
 
+fn merge_stats<'a>(
+    stats_vec: Vec<HashMap<Station<'a>, Weather, CustomHasherBuilder>>,
+) -> HashMap<Station<'a>, Weather, CustomHasherBuilder> {
+    let mut result = HashMap::with_capacity_and_hasher(10_000, CustomHasherBuilder);
+    for stats in stats_vec {
+        for (station, weather) in stats {
+            result
+                .entry(station)
+                .and_modify(|entry: &mut Weather| {
+                    entry.min = entry.min.min(weather.min);
+                    entry.max = entry.max.max(weather.max);
+                    entry.mean += weather.mean;
+                    entry.samples += weather.samples;
+                })
+                .or_insert(weather);
+        }
+    }
+
+    result
+}
+
 fn main() {
     let filename = std::env::args().nth(1).expect("missing filename");
     let file = File::open(filename).expect("could not open file");
 
-    let mut stats: HashMap<Station, Weather, CustomHasherBuilder> =
-        HashMap::with_capacity_and_hasher(10_000, CustomHasherBuilder);
-    let mut buf = mmap(&file);
+    let buf = mmap(&file);
 
-    while !buf.is_empty() {
-        if get_byte(buf, 0) == b'#' {
-            continue;
-        }
-        let (station, temperature, remainder) = split_line(buf);
-        buf = remainder;
-        let temperature = parse_temperature(temperature);
+    std::thread::scope(|s| {
+        let nr_threads = std::thread::available_parallelism().unwrap().get();
+        let mut results = Vec::with_capacity(nr_threads);
+        let len = buf.len();
+        for tid in 0..nr_threads {
+            let mut start = buf.len() / nr_threads * tid;
+            let mut end = start + buf.len() / nr_threads;
+            while start > 0 && get_byte(buf, start - 1) != b'\n' {
+                start -= 1;
+            }
+            while end < len && get_byte(buf, end - 1) != b'\n' {
+                end += 1;
+            }
+            let mut buf = &buf[start..end];
 
-        let station = Station(station);
-        stats
-            .entry(station)
-            .and_modify(|entry| {
-                if temperature < entry.min {
-                    entry.min = temperature;
-                } else if temperature > entry.max {
-                    entry.max = temperature;
+            let jh = s.spawn(move || {
+                let mut stats: HashMap<Station, Weather, CustomHasherBuilder> =
+                    HashMap::with_capacity_and_hasher(10_000, CustomHasherBuilder);
+                while !buf.is_empty() {
+                    if get_byte(buf, 0) == b'#' {
+                        continue;
+                    }
+                    let (station, temperature, remainder) = split_line(buf);
+                    buf = remainder;
+                    let temperature = parse_temperature(temperature);
+
+                    let station = Station(station);
+                    stats
+                        .entry(station)
+                        .and_modify(|entry| {
+                            if temperature < entry.min {
+                                entry.min = temperature;
+                            } else if temperature > entry.max {
+                                entry.max = temperature;
+                            }
+
+                            entry.mean += temperature as i64;
+                            entry.samples += 1;
+                        })
+                        .or_insert(Weather {
+                            samples: 1,
+                            min: temperature,
+                            mean: temperature as i64,
+                            max: temperature,
+                        });
                 }
 
-                entry.mean += temperature as i64;
-                entry.samples += 1;
-            })
-            .or_insert(Weather {
-                samples: 1,
-                min: temperature,
-                mean: temperature as i64,
-                max: temperature,
+                stats
             });
-    }
 
-    print(stats);
+            results.push(jh);
+        }
+
+        let stats = results
+            .into_iter()
+            .map(|v| v.join().unwrap())
+            .collect::<Vec<_>>();
+        print(merge_stats(stats));
+    });
 }
 
 fn print(stats: HashMap<Station, Weather, CustomHasherBuilder>) {
