@@ -143,27 +143,6 @@ fn mmap(file: &File) -> &[u8] {
     }
 }
 
-fn merge_stats<'a>(
-    stats_vec: Vec<HashMap<Station<'a>, Weather, CustomHasherBuilder>>,
-) -> HashMap<Station<'a>, Weather, CustomHasherBuilder> {
-    let mut result = HashMap::with_capacity_and_hasher(10_000, CustomHasherBuilder);
-    for stats in stats_vec {
-        for (station, weather) in stats {
-            result
-                .entry(station)
-                .and_modify(|entry: &mut Weather| {
-                    entry.min = entry.min.min(weather.min);
-                    entry.max = entry.max.max(weather.max);
-                    entry.mean += weather.mean;
-                    entry.samples += weather.samples;
-                })
-                .or_insert(weather);
-        }
-    }
-
-    result
-}
-
 fn main() {
     let filename = std::env::args().nth(1).expect("missing filename");
     let file = File::open(filename).expect("could not open file");
@@ -172,7 +151,7 @@ fn main() {
 
     std::thread::scope(|s| {
         let nr_threads = std::thread::available_parallelism().unwrap().get();
-        let mut results = Vec::with_capacity(nr_threads);
+        let (tx, rx) = std::sync::mpsc::sync_channel(nr_threads);
         let len = buf.len();
         for tid in 0..nr_threads {
             let mut start = buf.len() / nr_threads * tid;
@@ -185,7 +164,8 @@ fn main() {
             }
             let mut buf = &buf[start..end];
 
-            let jh = s.spawn(move || {
+            let tx = tx.clone();
+            s.spawn(move || {
                 let mut stats: HashMap<Station, Weather, CustomHasherBuilder> =
                     HashMap::with_capacity_and_hasher(10_000, CustomHasherBuilder);
                 while !buf.is_empty() {
@@ -216,39 +196,35 @@ fn main() {
                             max: temperature,
                         });
                 }
-
-                stats
+                tx.send(stats).unwrap();
+                drop(tx);
             });
-
-            results.push(jh);
         }
 
-        let stats = results
-            .into_iter()
-            .map(|v| v.join().unwrap())
-            .collect::<Vec<_>>();
-        print(merge_stats(stats));
+        drop(tx);
+        let mut result = BTreeMap::new();
+        while let Ok(stats) = rx.recv() {
+            for (station, weather) in stats {
+                result
+                    .entry(unsafe { str::from_utf8_unchecked(station.0) })
+                    .and_modify(|entry: &mut Weather| {
+                        entry.min = entry.min.min(weather.min);
+                        entry.max = entry.max.max(weather.max);
+                        entry.mean += weather.mean;
+                        entry.samples += weather.samples;
+                    })
+                    .or_insert(weather);
+            }
+        }
+
+        print(result);
     });
 }
 
-fn print(stats: HashMap<Station, Weather, CustomHasherBuilder>) {
+fn print(stats: BTreeMap<&str, Weather>) {
     let stdout = std::io::stdout().lock();
     let mut writer = std::io::BufWriter::new(stdout);
     use std::io::Write;
-
-    let stats: BTreeMap<&str, (f64, f64, f64)> = stats
-        .into_iter()
-        .map(|(station, weather)| {
-            (
-                unsafe { str::from_utf8_unchecked(station.0) },
-                (
-                    weather.min as f64 / 10.0,
-                    (weather.mean as f64 / 10.0 / weather.samples as f64),
-                    weather.max as f64 / 10.0,
-                ),
-            )
-        })
-        .collect();
 
     write!(writer, "{{").unwrap();
     let mut stats = stats.into_iter().peekable();
@@ -256,7 +232,10 @@ fn print(stats: HashMap<Station, Weather, CustomHasherBuilder>) {
         write!(
             writer,
             "{}={:.1}/{:.1}/{:.1}",
-            station, temperatures.0, temperatures.1, temperatures.2,
+            station,
+            temperatures.min as f64 / 10.0,
+            temperatures.mean as f64 / 10.0 / temperatures.samples as f64,
+            temperatures.max as f64 / 10.0,
         )
         .unwrap();
 
